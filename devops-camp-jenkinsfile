@@ -3,55 +3,59 @@ pipeline {
         label 'jenkins-agent'
     }
     environment {
-        PIPELINE_HASH = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-        HARBOR_REGISTRY = 'harbor.dev.afsmtddso.com'
-        HARBOR_PROJECT = 'bpowell-habor-project'
-        APP_IMAGE_NAME = 'app'
+    	PIPELINE_HASH = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+    	HARBOR_REGISTRY = 'harbor.dev.afsmtddso.com'
+    	HARBOR_PROJECT = 'bpowell-harbor-project'   
+    	APP_IMAGE_NAME = 'app'
     }
     stages {
         stage('Application repository') {
             steps {
                 echo "Cloning application repository"
                 sh 'git clone https://github.com/bpowe2288/afs-labs-student.git'
-                dir('afs-labs-student') {
-                    script {
-                        env.APP_HASH = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-                    }
-                }
+		dir('afs-labs-student') {
+		    script{
+		        env.APP_HASH = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+		    }
+		}
+
             }
         }
         stage('Application docker build') {
             steps {
                 echo "Building application image"
-                withCredentials([usernameColonPassword(credentialsId: 'bpowell-harbor-auth', variable: 'HARBOR-AUTH')]) {
-                    script {
-                        docker.build('$APP_IMAGE_NAME-$APP_HASH', '-f ./app/Dockerfile ./afs-labs-student')
-                        docker.withRegistry('https://$HARBOR_REGISTRY', 'bpowell-harbor-auth') {
-                            sh 'docker tag $APP_IMAGE_NAME-$APP_HASH $HARBOR_REGISTRY/$HARBOR_PROJECT/$APP_IMAGE_NAME:$APP_HASH-$PIPELINE_HASH'
-                            sh 'docker push $HARBOR_REGISTRY/$HARBOR_PROJECT/$APP_IMAGE_NAME:$APP_HASH-$PIPELINE_HASH'
-                        }
-                    }
-                }
+		withCredentials([usernameColonPassword(credentialsId: 'bpowell-harbor-auth', variable: 'HARBOR-AUTH')]) {
+		    script {
+		        docker.build('$APP_IMAGE_NAME-$APP_HASH', '-f ./app/Dockerfile ./afs-labs-student')
+		        docker.withRegistry('https://$HARBOR_REGISTRY', 'bpowell-harbor-auth') {
+		            sh 'docker tag $APP_IMAGE_NAME-$APP_HASH $HARBOR_REGISTRY/$HARBOR_PROJECT/$APP_IMAGE_NAME:$APP_HASH-$PIPELINE_HASH'
+		            sh 'docker push $HARBOR_REGISTRY/$HARBOR_PROJECT/$APP_IMAGE_NAME:$APP_HASH-$PIPELINE_HASH'
+		        }
+		    }
+		}
             }
-            post {
-                always {
-                    echo "Clean local $APP_IMAGE_NAME image"
-                    script {
-                        try {
-                            sh 'docker rmi $APP_IMAGE_NAME-$APP_HASH:latest'
-                            sh 'docker rmi $HARBOR_REGISTRY/$HARBOR_PROJECT/$APP_IMAGE_NAME:$APP_HASH-$PIPELINE_HASH'
-                        } catch (err) {
-                            echo err.getMessage()
-                        }
-                    }
-                }
-            }
+	    post {
+	        always {
+	            echo "Clean local $APP_IMAGE_NAME image"
+	            script {
+	                try {
+	                    sh 'docker rmi $APP_IMAGE_NAME-$APP_HASH:latest'
+	                    sh 'docker rmi $HARBOR_REGISTRY/$HARBOR_PROJECT/$APP_IMAGE_NAME:$APP_HASH-$PIPELINE_HASH'
+	                } catch (err) {
+	                    echo err.getMessage()
+	                }
+	            }
+	        }
+	    }
         }
- stage('Security scanning') {
+        stage('Security scanning') {
             steps {
 	        withCredentials([usernamePassword(credentialsId: 'bpowell-harbor-auth', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
 		    echo "Scanning $APP_IMAGE_NAME image"
 		    sh 'python harbor_scanner.py -i $APP_IMAGE_NAME -r $HARBOR_REGISTRY -p $HARBOR_PROJECT -c ${USERNAME}:${PASSWORD}'
+                }
+            }
+        }
         stage('Test'){
             steps {
                 echo "Testing stage"
@@ -60,15 +64,15 @@ pipeline {
         stage('Deploy') {
             steps {
                 echo "Deployment stage"
-                sh 'kubectl -n bpowell set image deployment/app-deployment --record=true app-deployment=$HARBOR_REGISTRY/$HARBOR_PROJECT/$APP_IMAGE_NAME:$APP_HASH-$PIPELINE_HASH'
-            }
+		sh 'kubectl -n bpowell set image deployment/app-deployment app-deployment=$HARBOR_REGISTRY/$HARBOR_PROJECT/$APP_IMAGE_NAME:$APP_HASH-$PIPELINE_HASH'
+	    }
         }
     }
     post {
         cleanup {
             echo "Clean workspace"
-            sh 'rm -rf .git ./*'
+		sh 'docker system prune -f'
+		sh 'rm -rf .git ./*'
         }
     }
 }
-
